@@ -1,5 +1,5 @@
 import sys, traceback
-
+#trying the output
 print("Step 1: Setting up vector store...")
 try:
     from src.rag.chunker import ASTCodeChunker
