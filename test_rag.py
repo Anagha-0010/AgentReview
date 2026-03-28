@@ -1,6 +1,7 @@
 from src.rag.chunker import ASTCodeChunker
 from src.rag.vector_store import CodeVectorStore
 
+#tring a pr 3
 # Chunk this project's own source code
 chunker = ASTCodeChunker()
 chunks = chunker.chunk_directory("src")
