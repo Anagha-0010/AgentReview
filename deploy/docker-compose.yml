@@ -1,0 +1,26 @@
+version: "3.9"
+services:
+  api:
+    build: ..
+    ports:
+      - "8000:8000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - LLM_MODEL=${LLM_MODEL}
+    volumes:
+      - chroma_data:/app/.chroma
+      - log_data:/app/logs
+
+  dashboard:
+    build: ..
+    ports:
+      - "8501:8501"
+    command: uv run streamlit run src/ui/dashboard.py --server.port 8501
+    depends_on:
+      - api
+
+volumes:
+  chroma_data:
+  log_data:

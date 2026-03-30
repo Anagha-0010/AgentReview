@@ -3,16 +3,17 @@ import httpx
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from src.core.storage import load_reviews
 
 st.set_page_config(
     page_title="AgentReview Dashboard",
     page_icon="🤖",
     layout="wide"
 )
+
+# Import storage at top level
+from src.core.storage import load_reviews, save_review
 
 st.title("🤖 AgentReview Dashboard")
 st.caption("AI-powered GitHub PR review system")
@@ -31,6 +32,7 @@ except Exception:
 if st.sidebar.button("🔄 Refresh"):
     st.rerun()
 
+# ── Load reviews ──────────────────────────────────────────
 reviews = load_reviews()
 
 # ── Top metrics ───────────────────────────────────────────
@@ -52,20 +54,20 @@ st.divider()
 
 # ── Charts ────────────────────────────────────────────────
 if reviews:
+    import pandas as pd
     st.subheader("📈 Metrics")
     chart_col1, chart_col2 = st.columns(2)
 
     with chart_col1:
         st.markdown("**Issues by type (all reviews)**")
-        all_bugs = sum(r.get("issues", {}).get("bugs", 0) for r in reviews)
-        all_security = sum(r.get("issues", {}).get("security", 0) for r in reviews)
-        all_perf = sum(r.get("issues", {}).get("performance", 0) for r in reviews)
-        all_style = sum(r.get("issues", {}).get("style", 0) for r in reviews)
-
-        import pandas as pd
         issue_data = pd.DataFrame({
             "Type": ["Bugs", "Security", "Performance", "Style"],
-            "Count": [all_bugs, all_security, all_perf, all_style]
+            "Count": [
+                sum(r.get("issues", {}).get("bugs", 0) for r in reviews),
+                sum(r.get("issues", {}).get("security", 0) for r in reviews),
+                sum(r.get("issues", {}).get("performance", 0) for r in reviews),
+                sum(r.get("issues", {}).get("style", 0) for r in reviews)
+            ]
         })
         st.bar_chart(issue_data.set_index("Type"))
 
@@ -79,21 +81,20 @@ if reviews:
 
     st.divider()
 
-    # Agent step breakdown for latest review
-    if reviews:
-        latest = reviews[-1]
-        st.subheader("⚡ Latest Review — Agent Step Breakdown")
-        s1, s2, s3, s4 = st.columns(4)
-        latency = latest.get("latency", {})
-        s1.metric("Total", f"{latest.get('latency_ms', 0)}ms")
-        s2.metric("Retrieve", f"{latency.get('retrieve_ms', 0)}ms")
-        s3.metric("Analyze", f"{latency.get('analyze_ms', 0)}ms")
-        s4.metric("Synthesize", f"{latency.get('synthesize_ms', 0)}ms")
+    latest = reviews[-1]
+    st.subheader("⚡ Latest Review — Agent Step Breakdown")
+    s1, s2, s3, s4 = st.columns(4)
+    latency = latest.get("latency", {})
+    s1.metric("Total", f"{latest.get('latency_ms', 0)}ms")
+    s2.metric("Retrieve", f"{latency.get('retrieve_ms', 0)}ms")
+    s3.metric("Analyze", f"{latency.get('analyze_ms', 0)}ms")
+    s4.metric("Synthesize", f"{latency.get('synthesize_ms', 0)}ms")
 
     st.divider()
 
 # ── Manual review ─────────────────────────────────────────
 st.subheader("🧪 Manual Review")
+
 sample_diff = """--- a/src/auth.py
 +++ b/src/auth.py
 @@ -10,6 +10,12 @@
@@ -126,17 +127,30 @@ if st.button("▶️ Run Review", type="primary"):
                 orc = get_orchestrator()
                 result = orc.review(diff_input)
 
-                st.success("✅ Review complete!")
+                # Save to storage
+                save_review(
+                    pr_number=0,
+                    repo="manual-trigger",
+                    diff=diff_input,
+                    comment=result["review_comment"],
+                    queries=result.get("search_queries", []),
+                    analysis=result.get("analysis", {}),
+                    latency_ms=result.get("latency", {}).get("total_ms", 0)
+                )
 
-                m1, m2, m3 = st.columns(3)
+                # Verify it saved
+                saved = load_reviews()
+                st.success(f"✅ Review complete and saved! Total reviews: {len(saved)}")
+
                 issues = result.get("analysis", {})
+                m1, m2, m3 = st.columns(3)
                 m1.metric("Total issues", sum([
                     len(issues.get("bugs", [])),
                     len(issues.get("security", [])),
                     len(issues.get("performance", [])),
                     len(issues.get("style", []))
                 ]))
-                m2.metric("Total latency", f"{result.get('latency', {}).get('total_ms', 0)}ms")
+                m2.metric("Latency", f"{result.get('latency', {}).get('total_ms', 0)}ms")
                 m3.metric("Context chunks", len(result.get("search_queries", [])))
 
                 st.markdown("### Review Comment")
@@ -155,6 +169,8 @@ if st.button("▶️ Run Review", type="primary"):
                 st.error(f"Review failed: {e}")
                 import traceback
                 st.code(traceback.format_exc())
+    else:
+        st.warning("Please paste a diff first")
 
 st.divider()
 

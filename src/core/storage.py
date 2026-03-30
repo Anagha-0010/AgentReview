@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from loguru import logger
 
-STORAGE_FILE = Path("logs/reviews.json")
+STORAGE_FILE = Path(__file__).resolve().parent.parent.parent / "logs" / "reviews.json"
 
 def save_review(
     pr_number: int,
