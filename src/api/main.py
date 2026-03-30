@@ -21,7 +21,20 @@ github_client = None
 async def lifespan(app: FastAPI):
     global vector_store, orchestrator, github_client
     logger.info("Starting AgentReview...")
+
     vector_store = CodeVectorStore()
+    
+    # Index codebase on startup if store is empty
+    if vector_store.count() == 0:
+        logger.info("Vector store empty — indexing codebase...")
+        from src.rag.chunker import ASTCodeChunker
+        chunker = ASTCodeChunker()
+        chunks = chunker.chunk_directory("src")
+        vector_store.add_chunks(chunks)
+        logger.info(f"Indexed {vector_store.count()} chunks")
+    else:
+        logger.info(f"Vector store loaded — {vector_store.count()} chunks ready")
+
     orchestrator = ReviewOrchestrator(vector_store=vector_store)
     github_client = GitHubClient()
     logger.info("AgentReview ready!")
@@ -53,9 +66,28 @@ async def run_review(repo_full_name: str, pr_number: int):
         github_client.post_review_comment(
             repo_full_name, pr_number, result["review_comment"]
         )
+
+        from src.core.storage import save_review
+        save_review(
+            pr_number=pr_number,
+            repo=repo_full_name,
+            diff=pr_data.diff,
+            comment=result["review_comment"],
+            queries=result.get("search_queries", [])
+        )
+
         logger.info(f"Review posted for PR #{pr_number}")
     except Exception as e:
         logger.error(f"Review failed for PR #{pr_number}: {e}")
+
+@app.post("/reindex")
+async def reindex():
+    from src.rag.chunker import ASTCodeChunker
+    vector_store.clear()
+    chunker = ASTCodeChunker()
+    chunks = chunker.chunk_directory("src")
+    vector_store.add_chunks(chunks)
+    return {"status": "reindexed", "chunks": vector_store.count()}
 
 @app.get("/")
 async def root():

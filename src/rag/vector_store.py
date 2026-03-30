@@ -1,17 +1,21 @@
 import chromadb
+from pathlib import Path
 from loguru import logger
 from src.rag.chunker import CodeChunk
 from src.rag.embedder import CodeEmbedder
 
+CHROMA_PATH = Path(".chroma")
+
 class CodeVectorStore:
     def __init__(self, collection_name: str = "codebase"):
-        self.client = chromadb.Client()
+        CHROMA_PATH.mkdir(exist_ok=True)
+        self.client = chromadb.PersistentClient(path=str(CHROMA_PATH))
         self.embedder = CodeEmbedder()
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
             metadata={"hnsw:space": "cosine"}
         )
-        logger.info(f"Vector store ready — collection: {collection_name}")
+        logger.info(f"Vector store ready — {self.collection.count()} chunks loaded from disk")
 
     def add_chunks(self, chunks: list[CodeChunk]):
         if not chunks:
@@ -38,10 +42,14 @@ class CodeVectorStore:
         logger.info(f"Added {len(chunks)} chunks to vector store")
 
     def search(self, query: str, n_results: int = 5) -> list[dict]:
+        if self.collection.count() == 0:
+            logger.warning("Vector store is empty")
+            return []
+
         query_embedding = self.embedder.embed_single(query)
         results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=n_results
+            n_results=min(n_results, self.collection.count())
         )
 
         hits = []
@@ -55,3 +63,11 @@ class CodeVectorStore:
 
     def count(self) -> int:
         return self.collection.count()
+
+    def clear(self):
+        self.client.delete_collection("codebase")
+        self.collection = self.client.get_or_create_collection(
+            name="codebase",
+            metadata={"hnsw:space": "cosine"}
+        )
+        logger.info("Vector store cleared")
