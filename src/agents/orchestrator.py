@@ -1,4 +1,5 @@
 import json
+import time
 from typing import TypedDict
 from langgraph.graph import StateGraph, END
 from loguru import logger
@@ -13,6 +14,7 @@ class ReviewState(TypedDict):
     analysis: dict
     review_comment: str
     error: str
+    latency: dict
 
 class ReviewOrchestrator(BaseAgent):
     def __init__(self, vector_store: CodeVectorStore):
@@ -20,33 +22,28 @@ class ReviewOrchestrator(BaseAgent):
         self.vector_store = vector_store
         self.graph = self._build_graph()
 
-    def _build_graph(self) -> any:
+    def _build_graph(self):
         graph = StateGraph(ReviewState)
-
         graph.add_node("retrieve", self._retrieve_node)
         graph.add_node("analyze", self._analyze_node)
         graph.add_node("synthesize", self._synthesize_node)
-
         graph.set_entry_point("retrieve")
         graph.add_edge("retrieve", "analyze")
         graph.add_edge("analyze", "synthesize")
         graph.add_edge("synthesize", END)
-
         return graph.compile()
 
     def _retrieve_node(self, state: ReviewState) -> ReviewState:
         logger.info("Agent: Retrieving relevant context...")
+        t = time.time()
         try:
             prompt = RETRIEVAL_PROMPT.format(diff=state["diff"])
             queries_text = self.call_llm(prompt, max_tokens=300)
-
             queries = [
                 line.strip().lstrip("0123456789.-) ")
                 for line in queries_text.strip().split("\n")
                 if line.strip()
             ][:5]
-
-            logger.info(f"Generated {len(queries)} search queries")
 
             all_results = []
             seen = set()
@@ -63,8 +60,9 @@ class ReviewOrchestrator(BaseAgent):
                 for r in all_results[:8]
             ])
 
-            logger.info(f"Retrieved {len(all_results)} unique context chunks")
-            return {**state, "search_queries": queries, "context": context}
+            latency = {**state.get("latency", {}), "retrieve_ms": round((time.time() - t) * 1000)}
+            logger.info(f"Retrieved {len(all_results)} chunks in {latency['retrieve_ms']}ms")
+            return {**state, "search_queries": queries, "context": context, "latency": latency}
 
         except Exception as e:
             logger.error(f"Retrieval failed: {e}")
@@ -72,6 +70,7 @@ class ReviewOrchestrator(BaseAgent):
 
     def _analyze_node(self, state: ReviewState) -> ReviewState:
         logger.info("Agent: Analyzing code changes...")
+        t = time.time()
         try:
             prompt = ANALYSIS_PROMPT.format(
                 diff=state["diff"],
@@ -92,8 +91,9 @@ class ReviewOrchestrator(BaseAgent):
                     "summary": response
                 }
 
-            logger.info("Analysis complete")
-            return {**state, "analysis": analysis}
+            latency = {**state.get("latency", {}), "analyze_ms": round((time.time() - t) * 1000)}
+            logger.info(f"Analysis complete in {latency['analyze_ms']}ms")
+            return {**state, "analysis": analysis, "latency": latency}
 
         except Exception as e:
             logger.error(f"Analysis failed: {e}")
@@ -101,12 +101,15 @@ class ReviewOrchestrator(BaseAgent):
 
     def _synthesize_node(self, state: ReviewState) -> ReviewState:
         logger.info("Agent: Synthesizing review comment...")
+        t = time.time()
         try:
             analysis_text = json.dumps(state["analysis"], indent=2)
             prompt = SYNTHESIS_PROMPT.format(analysis=analysis_text)
             review = self.call_llm(prompt, max_tokens=1000)
-            logger.info("Review comment ready")
-            return {**state, "review_comment": review}
+
+            latency = {**state.get("latency", {}), "synthesize_ms": round((time.time() - t) * 1000)}
+            logger.info(f"Synthesis complete in {latency['synthesize_ms']}ms")
+            return {**state, "review_comment": review, "latency": latency}
 
         except Exception as e:
             logger.error(f"Synthesis failed: {e}")
@@ -114,14 +117,18 @@ class ReviewOrchestrator(BaseAgent):
 
     def review(self, diff: str) -> dict:
         logger.info("Starting review pipeline...")
+        t = time.time()
         initial_state = ReviewState(
             diff=diff,
             search_queries=[],
             context="",
             analysis={},
             review_comment="",
-            error=""
+            error="",
+            latency={}
         )
         result = self.graph.invoke(initial_state)
-        logger.info("Review pipeline complete")
+        total_ms = round((time.time() - t) * 1000)
+        result["latency"]["total_ms"] = total_ms
+        logger.info(f"Review pipeline complete in {total_ms}ms")
         return result

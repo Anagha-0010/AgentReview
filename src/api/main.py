@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from loguru import logger
@@ -54,6 +55,7 @@ def verify_github_signature(payload: bytes, signature: str) -> bool:
     return hmac.compare_digest(f"sha256={expected}", signature)
 
 async def run_review(repo_full_name: str, pr_number: int):
+    t = time.time()
     try:
         logger.info(f"Running review for PR #{pr_number}")
         pr_data = github_client.get_pr_data(repo_full_name, pr_number)
@@ -73,9 +75,10 @@ async def run_review(repo_full_name: str, pr_number: int):
             repo=repo_full_name,
             diff=pr_data.diff,
             comment=result["review_comment"],
-            queries=result.get("search_queries", [])
+            queries=result.get("search_queries", []),
+            analysis=result.get("analysis", {}),
+            latency_ms=result.get("latency", {}).get("total_ms", 0)
         )
-
         logger.info(f"Review posted for PR #{pr_number}")
     except Exception as e:
         logger.error(f"Review failed for PR #{pr_number}: {e}")
