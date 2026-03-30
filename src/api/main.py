@@ -123,3 +123,14 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(run_review, repo_full_name, pr_number)
     return {"status": "review started", "pr": pr_number}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global vector_store, orchestrator, github_client
+    logger.info("Starting AgentReview...")
+    vector_store = CodeVectorStore()
+    orchestrator = ReviewOrchestrator(vector_store=vector_store)
+    github_client = GitHubClient()
+    logger.info("AgentReview ready!")
+    yield
+    logger.info("Shutting down...")

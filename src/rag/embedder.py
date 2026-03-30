@@ -1,14 +1,19 @@
-from sentence_transformers import SentenceTransformer
 from loguru import logger
 
-class CodeEmbedder:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        logger.info(f"Loading embedding model: {model_name}")
-        self.model = SentenceTransformer(model_name)
-        logger.info("Embedding model loaded")
+_model = None
 
+def get_model():
+    global _model
+    if _model is None:
+        from sentence_transformers import SentenceTransformer
+        logger.info("Loading embedding model: all-MiniLM-L6-v2")
+        _model = SentenceTransformer("all-MiniLM-L6-v2")
+        logger.info("Embedding model loaded")
+    return _model
+
+class CodeEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
-        embeddings = self.model.encode(texts, show_progress_bar=False)
+        embeddings = get_model().encode(texts, show_progress_bar=False)
         return embeddings.tolist()
 
     def embed_single(self, text: str) -> list[float]:
