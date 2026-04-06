@@ -206,8 +206,3 @@ The Streamlit dashboard at `http://localhost:8501` shows:
 ```
 
 ---
-
-
-## License
-
-MIT
